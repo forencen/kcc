@@ -287,7 +287,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex() && evm.depth > 0) {
 		context := []interface{}{
 			"type", "Call", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
 			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
@@ -344,7 +344,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 			gas = 0
 		}
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex() && evm.depth > 0) {
 		context := []interface{}{
 			"type", "CallCode", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
 			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
@@ -391,7 +391,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 			gas = 0
 		}
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex() && evm.depth > 0) {
 		context := []interface{}{
 			"type", "DelegateCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
 			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
@@ -454,7 +454,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 			gas = 0
 		}
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex() && evm.depth > 0) {
 		context := []interface{}{
 			"type", "StaticCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
 			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
@@ -557,7 +557,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.vmConfig.Debug && evm.depth == 0 {
 		evm.vmConfig.Tracer.CaptureEnd(ret, gas-contract.Gas, time.Since(start), err)
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex() && evm.depth > 0) {
 		context := []interface{}{
 			"type", typ, "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
 			"from", caller.Address().Hex(), "to", address.Hex(), "value", value, "depth", evm.depth,
