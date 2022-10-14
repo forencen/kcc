@@ -90,6 +90,7 @@ type StateDB struct {
 	refund uint64
 
 	thash, bhash common.Hash
+	Thash        common.Hash
 	txIndex      int
 	logs         map[common.Hash][]*types.Log
 	logSize      uint
@@ -899,6 +900,14 @@ func (s *StateDB) Prepare(thash, bhash common.Hash, ti int) {
 	s.bhash = bhash
 	s.txIndex = ti
 	s.accessList = newAccessList()
+}
+
+func (s *StateDB) GetTHash() common.Hash {
+	return s.thash
+}
+
+func (s *StateDB) GetBHash() common.Hash {
+	return s.bhash
 }
 
 func (s *StateDB) clearJournalAndRefund() {

@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -286,6 +287,13 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
+	if (evm.StateDB.GetBHash() != common.Hash{}) {
+		context := []interface{}{
+			"type", "Call", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
+		}
+		log.Info("internalTracer", context...)
+	}
 	return ret, gas, err
 }
 
@@ -331,6 +339,14 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 			gas = 0
 		}
 	}
+	if (evm.StateDB.GetBHash() != common.Hash{}) {
+		context := []interface{}{
+			"type", "CallCode", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
+			"error", err.Error(),
+		}
+		log.Info("internalTracer", context...)
+	}
 	return ret, gas, err
 }
 
@@ -365,6 +381,14 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		if err != ErrExecutionReverted {
 			gas = 0
 		}
+	}
+	if (evm.StateDB.GetBHash() != common.Hash{}) {
+		context := []interface{}{
+			"type", "DelegateCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
+			"error", err.Error(),
+		}
+		log.Info("internalTracer", context...)
 	}
 	return ret, gas, err
 }
@@ -417,6 +441,14 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 			gas = 0
 		}
 	}
+	if (evm.StateDB.GetBHash() != common.Hash{}) {
+		context := []interface{}{
+			"type", "StaticCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
+			"error", err.Error(),
+		}
+		log.Info("internalTracer", context...)
+	}
 	return ret, gas, err
 }
 
@@ -433,7 +465,7 @@ func (c *codeAndHash) Hash() common.Hash {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *big.Int, address common.Address) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *big.Int, address common.Address, typ string) ([]byte, common.Address, uint64, error) {
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if evm.depth > int(params.CallCreateDepth) {
@@ -461,7 +493,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		evm.StateDB.SetNonce(address, 1)
 	}
 	evm.Context.Transfer(evm.StateDB, caller.Address(), address, value)
-
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas)
@@ -509,6 +540,14 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.vmConfig.Debug && evm.depth == 0 {
 		evm.vmConfig.Tracer.CaptureEnd(ret, gas-contract.Gas, time.Since(start), err)
 	}
+	if (evm.StateDB.GetBHash() != common.Hash{}) {
+		context := []interface{}{
+			"type", typ, "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", address.Hex(), "value", value, "depth", evm.depth,
+			"error", err.Error(),
+		}
+		log.Info("internalTracer", context...)
+	}
 	return ret, address, contract.Gas, err
 
 }
@@ -516,7 +555,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // Create creates a new contract using code as deployment code.
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.StateDB.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr)
+	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr, "Create")
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -526,7 +565,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.I
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *big.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, "Create2")
 }
 
 // ChainConfig returns the environment's chain configuration
