@@ -464,7 +464,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
 		context := []interface{}{
 			"type", "StaticCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth, "index",
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "op_depth", evm.depth, "depth",
 			evm.TxContext.Index,
 		}
 		if err != nil {
