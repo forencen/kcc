@@ -117,6 +117,7 @@ type TxContext struct {
 	// Message information
 	Origin   common.Address // Provides information for ORIGIN
 	GasPrice *big.Int       // Provides information for GASPRICE
+	Index    int
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -248,7 +249,20 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		evm.StateDB.CreateAccount(addr)
 	}
 	evm.Context.Transfer(evm.StateDB, caller.Address(), addr, value)
-
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+		context := []interface{}{
+			"type", "Call", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "op_depth", evm.depth,
+			"depth", evm.TxContext.Index,
+		}
+		if err != nil {
+			context = append(context, "error", err.Error())
+		} else {
+			context = append(context, "error", "")
+		}
+		log.Info("internalTracer", context...)
+		evm.TxContext.Index += 1
+	}
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug && evm.depth == 0 {
 		evm.vmConfig.Tracer.CaptureStart(caller.Address(), addr, false, input, gas, value)
@@ -287,18 +301,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
-		context := []interface{}{
-			"type", "Call", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
-		}
-		if err != nil {
-			context = append(context, "error", err.Error())
-		} else {
-			context = append(context, "error", "")
-		}
-		log.Info("internalTracer", context...)
-	}
+
 	return ret, gas, err
 }
 
@@ -347,7 +350,8 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
 		context := []interface{}{
 			"type", "CallCode", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "depth", evm.depth,
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "op_depth", evm.depth,
+			"depth", evm.TxContext.Index,
 		}
 		if err != nil {
 			context = append(context, "error", err.Error())
@@ -355,6 +359,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 			context = append(context, "error", "")
 		}
 		log.Info("internalTracer", context...)
+		evm.TxContext.Index += 1
 	}
 	return ret, gas, err
 }
@@ -394,7 +399,8 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
 		context := []interface{}{
 			"type", "DelegateCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "op_depth", evm.depth,
+			"depth", evm.TxContext.Index,
 		}
 		if err != nil {
 			context = append(context, "error", err.Error())
@@ -402,6 +408,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 			context = append(context, "error", "")
 		}
 		log.Info("internalTracer", context...)
+		evm.TxContext.Index += 1
 	}
 	return ret, gas, err
 }
@@ -457,7 +464,8 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
 		context := []interface{}{
 			"type", "StaticCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth,
+			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "depth", evm.depth, "index",
+			evm.TxContext.Index,
 		}
 		if err != nil {
 			context = append(context, "error", err.Error())
@@ -465,6 +473,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 			context = append(context, "error", "")
 		}
 		log.Info("internalTracer", context...)
+		evm.TxContext.Index += 1
 	}
 	return ret, gas, err
 }
@@ -560,7 +569,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
 		context := []interface{}{
 			"type", typ, "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", address.Hex(), "value", value, "depth", evm.depth,
+			"from", caller.Address().Hex(), "to", address.Hex(), "value", value, "op_depth", evm.depth,
+			"depth", evm.TxContext.Index,
 		}
 		if err != nil {
 			context = append(context, "error", err.Error())
@@ -568,6 +578,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			context = append(context, "error", "")
 		}
 		log.Info("internalTracer", context...)
+		evm.TxContext.Index += 1
 	}
 	return ret, address, contract.Gas, err
 

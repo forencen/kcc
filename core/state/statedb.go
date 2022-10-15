@@ -902,6 +902,10 @@ func (s *StateDB) Prepare(thash, bhash common.Hash, ti int) {
 	s.accessList = newAccessList()
 }
 
+func (s *StateDB) GetTIndex() int {
+	return s.txIndex
+}
+
 func (s *StateDB) GetTHash() common.Hash {
 	return s.thash
 }

@@ -33,6 +33,7 @@ type StateDB interface {
 
 	GetBHash() common.Hash
 	GetTHash() common.Hash
+	GetTIndex() int
 
 	GetNonce(common.Address) uint64
 	SetNonce(common.Address, uint64)
