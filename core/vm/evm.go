@@ -17,7 +17,10 @@
 package vm
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"sync/atomic"
@@ -118,6 +121,55 @@ type TxContext struct {
 	Origin   common.Address // Provides information for ORIGIN
 	GasPrice *big.Int       // Provides information for GASPRICE
 	Index    int
+	Trace    []int
+	Traces   []*TxInternal
+}
+
+// TxInternal 内部交易需要的数据
+type TxInternal struct {
+	from        common.Address
+	to          common.Address
+	value       *big.Int
+	data        []byte
+	action      string
+	blockNumber *big.Int
+	blockHash   common.Hash
+	txHash      common.Hash
+	index       int
+	depth       string
+	error       string
+}
+
+func (tx *TxInternal) SetError(_error string) {
+	tx.error = _error
+}
+
+func (tx *TxInternal) SetBlockNumber(_blockNumber *big.Int) {
+	tx.blockNumber = _blockNumber
+}
+
+func (tx *TxInternal) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"from":        tx.from.Hex(),
+		"to":          tx.to.Hex(),
+		"value":       tx.value,
+		"data":        hex.EncodeToString(tx.data),
+		"action":      tx.action,
+		"blockNumber": tx.blockNumber,
+		"blockHash":   tx.blockHash,
+		"txHash":      tx.txHash.Hex(),
+		"index":       tx.index,
+		"depth":       tx.depth,
+		"error":       tx.error,
+	})
+}
+
+func (tx *TxInternal) ToString() string {
+	marshal, err := json.Marshal(tx)
+	if err != nil {
+		return ""
+	}
+	return string(marshal)
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -230,6 +282,17 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	internalTx := &TxInternal{
+		from:      caller.Address(),
+		to:        addr,
+		value:     value,
+		data:      input,
+		action:    "Call",
+		blockHash: evm.StateDB.GetBHash(),
+		txHash:    evm.StateDB.GetTHash(),
+		index:     evm.TxContext.Index,
+		depth:     fmt.Sprint(evm.TxContext.Trace),
+	}
 	// Fail if we're trying to transfer more than the available balance
 	if value.Sign() != 0 && !evm.Context.CanTransfer(evm.StateDB, caller.Address(), value) {
 		return nil, gas, ErrInsufficientBalance
@@ -249,20 +312,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		evm.StateDB.CreateAccount(addr)
 	}
 	evm.Context.Transfer(evm.StateDB, caller.Address(), addr, value)
-	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
-		context := []interface{}{
-			"type", "Call", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", value, "op_depth", evm.depth,
-			"depth", evm.TxContext.Index,
-		}
-		if err != nil {
-			context = append(context, "error", err.Error())
-		} else {
-			context = append(context, "error", "")
-		}
-		log.Info("internalTracer", context...)
-		evm.TxContext.Index += 1
-	}
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug && evm.depth == 0 {
 		evm.vmConfig.Tracer.CaptureStart(caller.Address(), addr, false, input, gas, value)
@@ -283,9 +332,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			addrCopy := addr
 			// If the account has no code, we can abort here
 			// The depth-check is already done, and precompiles handled above
+			evm.TxContext.Trace = append(evm.TxContext.Trace, 0)
 			contract := NewContract(caller, AccountRef(addrCopy), value, gas)
 			contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), code)
 			ret, err = run(evm, contract, input, false)
+			evm.TxContext.Trace = evm.TxContext.Trace[0 : len(evm.TxContext.Trace)-1]
 			gas = contract.Gas
 		}
 	}
@@ -300,8 +351,14 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		// TODO: consider clearing up unused snapshots:
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
+		internalTx.SetError(err.Error())
 	}
-
+	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
+		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		evm.TxContext.Index += 1
+	}
+	evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
+	log.Info(internalTx.ToString())
 	return ret, gas, err
 }
 
@@ -358,7 +415,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		} else {
 			context = append(context, "error", "")
 		}
-		log.Info("internalTracer", context...)
+		// log.Info("internalTracer", context...)
 		evm.TxContext.Index += 1
 	}
 	return ret, gas, err
@@ -407,7 +464,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		} else {
 			context = append(context, "error", "")
 		}
-		log.Info("internalTracer", context...)
+		// log.Info("internalTracer", context...)
 		evm.TxContext.Index += 1
 	}
 	return ret, gas, err
@@ -431,7 +488,17 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// then certain tests start failing; stRevertTest/RevertPrecompiledTouchExactOOG.json.
 	// We could change this, but for now it's left for legacy reasons
 	var snapshot = evm.StateDB.Snapshot()
-
+	internalTx := &TxInternal{
+		from:      caller.Address(),
+		to:        addr,
+		value:     big.NewInt(0),
+		data:      input,
+		action:    "Call",
+		blockHash: evm.StateDB.GetBHash(),
+		txHash:    evm.StateDB.GetTHash(),
+		index:     evm.TxContext.Index,
+		depth:     fmt.Sprint(evm.TxContext.Trace),
+	}
 	// We do an AddBalance of zero here, just in order to trigger a touch.
 	// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 	// but is the correct thing to do and matters on other networks, in tests, and potential
@@ -444,6 +511,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		// At this point, we use a copy of address. If we don't, the go compiler will
 		// leak the 'contract' to the outer scope, and make allocation for 'contract'
 		// even if the actual execution ends on RunPrecompiled above.
+		evm.TxContext.Trace = append(evm.TxContext.Trace, 0)
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -453,6 +521,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		// above we revert to the snapshot and consume any gas remaining. Additionally
 		// when we're in Homestead this also counts for code storage gas errors.
 		ret, err = run(evm, contract, input, true)
+		evm.TxContext.Trace = evm.TxContext.Trace[0 : len(evm.TxContext.Trace)-1]
 		gas = contract.Gas
 	}
 	if err != nil {
@@ -462,19 +531,11 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		}
 	}
 	if (evm.StateDB.GetBHash().Hex() != common.Hash{}.Hex()) {
-		context := []interface{}{
-			"type", "StaticCall", "blockHash", evm.StateDB.GetBHash().Hex(), "txHash", evm.StateDB.GetTHash().Hex(),
-			"from", caller.Address().Hex(), "to", addr.Hex(), "value", 0, "op_depth", evm.depth, "depth",
-			evm.TxContext.Index,
-		}
-		if err != nil {
-			context = append(context, "error", err.Error())
-		} else {
-			context = append(context, "error", "")
-		}
-		log.Info("internalTracer", context...)
+		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
 		evm.TxContext.Index += 1
 	}
+	evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
+	log.Info(internalTx.ToString())
 	return ret, gas, err
 }
 
@@ -577,7 +638,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		} else {
 			context = append(context, "error", "")
 		}
-		log.Info("internalTracer", context...)
+		// log.Info("internalTracer", context...)
 		evm.TxContext.Index += 1
 	}
 	return ret, address, contract.Gas, err
