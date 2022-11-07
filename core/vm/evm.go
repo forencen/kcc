@@ -291,7 +291,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace),
+		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
@@ -397,7 +397,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace),
+		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
@@ -454,7 +454,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace),
+		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
@@ -517,7 +517,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace),
+		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
@@ -594,7 +594,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace),
+		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
