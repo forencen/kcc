@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -99,7 +100,10 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	if err != nil {
 		return nil, err
 	}
-
+	for _, v := range txContext.Traces {
+		v.SetBlockNumber(header.Number)
+		log.Info(v.ToString())
+	}
 	// Update the state with pending changes.
 	var root []byte
 	if config.IsByzantium(header.Number) {

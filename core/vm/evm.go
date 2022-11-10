@@ -21,8 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -122,7 +122,7 @@ type TxContext struct {
 	GasPrice *big.Int       // Provides information for GASPRICE
 	Index    int
 	Trace    []int
-	Traces   []*TxInternal
+	Traces   map[string]*TxInternal
 }
 
 // TxInternal 内部交易需要的数据
@@ -150,8 +150,8 @@ func (tx *TxInternal) SetBlockNumber(_blockNumber *big.Int) {
 
 func (tx *TxInternal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
-		"from":        tx.from.Hex(),
-		"to":          tx.to.Hex(),
+		"from":        strings.ToLower(tx.from.Hex()),
+		"to":          strings.ToLower(tx.to.Hex()),
 		"value":       tx.value,
 		"data":        hex.EncodeToString(tx.data),
 		"action":      tx.action,
@@ -282,25 +282,26 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		from:      caller.Address(),
 		to:        addr,
 		value:     value,
 		data:      input,
-		action:    "Call",
+		action:    "CALL",
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
+		depth:     depthStr[1 : len(depthStr)-1],
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
-		log.Info(internalTx.ToString())
 	}()
 	// Fail if we're trying to transfer more than the available balance
 	if value.Sign() != 0 && !evm.Context.CanTransfer(evm.StateDB, caller.Address(), value) {
@@ -388,25 +389,26 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		return nil, gas, ErrInsufficientBalance
 	}
 	var snapshot = evm.StateDB.Snapshot()
+	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		from:      caller.Address(),
 		to:        addr,
 		value:     value,
 		data:      input,
-		action:    "Call",
+		action:    "CALL",
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
+		depth:     depthStr[1 : len(depthStr)-1],
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
-		log.Info(internalTx.ToString())
 	}()
 	// It is allowed to call precompiles, even via delegatecall
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
@@ -445,25 +447,26 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		from:      caller.Address(),
 		to:        addr,
 		value:     big.NewInt(0),
 		data:      input,
-		action:    "DelegateCall",
+		action:    "DELEGATECALL",
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
+		depth:     depthStr[1 : len(depthStr)-1],
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
-		log.Info(internalTx.ToString())
 	}()
 	var snapshot = evm.StateDB.Snapshot()
 
@@ -508,25 +511,26 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// then certain tests start failing; stRevertTest/RevertPrecompiledTouchExactOOG.json.
 	// We could change this, but for now it's left for legacy reasons
 	var snapshot = evm.StateDB.Snapshot()
+	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		from:      caller.Address(),
 		to:        addr,
 		value:     big.NewInt(0),
 		data:      input,
-		action:    "StaticCall",
+		action:    "STATICCALL",
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
+		depth:     depthStr[1 : len(depthStr)-1],
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
-		log.Info(internalTx.ToString())
 	}()
 	// We do an AddBalance of zero here, just in order to trigger a touch.
 	// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -585,6 +589,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if !evm.Context.CanTransfer(evm.StateDB, caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
+	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		from:      caller.Address(),
 		to:        address,
@@ -594,16 +599,16 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		blockHash: evm.StateDB.GetBHash(),
 		txHash:    evm.StateDB.GetTHash(),
 		index:     evm.TxContext.Index,
-		depth:     fmt.Sprint(evm.TxContext.Trace[1:]),
+		depth:     depthStr[1 : len(depthStr)-1],
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		evm.TxContext.Traces = append(evm.TxContext.Traces, internalTx)
+		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
-		log.Info(internalTx.ToString())
 	}()
 	nonce := evm.StateDB.GetNonce(caller.Address())
 	evm.StateDB.SetNonce(caller.Address(), nonce+1)
@@ -682,7 +687,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // Create creates a new contract using code as deployment code.
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.StateDB.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr, "Create")
+	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr, "CREATE")
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -692,7 +697,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.I
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *big.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, "Create2")
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, "CREATE2")
 }
 
 // ChainConfig returns the environment's chain configuration

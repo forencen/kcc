@@ -63,7 +63,7 @@ func NewEVMTxContext(msg Message) vm.TxContext {
 		GasPrice: new(big.Int).Set(msg.GasPrice()),
 		Index:    0,
 		Trace:    make([]int, 1),
-		Traces:   make([]*vm.TxInternal, 1),
+		Traces:   make(map[string]*vm.TxInternal),
 	}
 }
 
