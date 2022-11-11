@@ -17,8 +17,8 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -148,28 +148,22 @@ func (tx *TxInternal) SetBlockNumber(_blockNumber *big.Int) {
 	tx.blockNumber = _blockNumber
 }
 
-func (tx *TxInternal) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
-		"from":        strings.ToLower(tx.from.Hex()),
-		"to":          strings.ToLower(tx.to.Hex()),
-		"value":       tx.value,
-		"data":        hex.EncodeToString(tx.data),
-		"action":      tx.action,
-		"blockNumber": tx.blockNumber,
-		"blockHash":   tx.blockHash,
-		"txHash":      tx.txHash.Hex(),
-		"index":       tx.index,
-		"depth":       tx.depth,
-		"error":       tx.error,
-	})
-}
-
 func (tx *TxInternal) ToString() string {
-	marshal, err := json.Marshal(tx)
-	if err != nil {
-		return ""
-	}
-	return string(marshal)
+	var buf bytes.Buffer
+	buf.WriteString("internalTracer\t")
+	buf.WriteString(fmt.Sprintf("action=%s\t", tx.action))
+	buf.WriteString(fmt.Sprintf("from=%s\t", strings.ToLower(tx.from.Hex())))
+	buf.WriteString(fmt.Sprintf("to=%s\t", strings.ToLower(tx.to.Hex())))
+	buf.WriteString(fmt.Sprintf("value=%d\t", tx.value))
+	buf.WriteString(fmt.Sprintf("txHash=%s\t", tx.txHash.Hex()))
+	buf.WriteString(fmt.Sprintf("depth=%s\t", tx.depth))
+	buf.WriteString(fmt.Sprintf("index=%d\t", tx.index))
+	buf.WriteString(fmt.Sprintf("blockNumber=%d\t", tx.blockNumber))
+	buf.WriteString(fmt.Sprintf("blockHash=%s\t", tx.blockHash.Hex()))
+	buf.WriteString(fmt.Sprintf("data=%s\t", hex.EncodeToString(tx.data)))
+	buf.WriteString(fmt.Sprintf("error=%s", tx.error))
+
+	return buf.String()
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
