@@ -1,3 +1,3 @@
 #!/bin/sh
 
-geth  $@ >> geth.log 2>&1
+geth  $@ >> /root/.ethereum/geth.log 2>&1
