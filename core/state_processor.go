@@ -19,6 +19,7 @@ package core
 import (
 	"fmt"
 	"github.com/ethereum/go-ethereum/log"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -101,8 +102,9 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 		return nil, err
 	}
 	for _, v := range txContext.Traces {
-		v.SetBlockNumber(header.Number)
-		log.Info(v.ToString())
+		v.BlockNumber = header.Number
+		toString, _ := v.ToString()
+		log.Info(fmt.Sprintf("internalTracer\t%s\t%s", time.Now().Format("2006-01-02 15:04:05.000"), string(toString)))
 	}
 	// Update the state with pending changes.
 	var root []byte

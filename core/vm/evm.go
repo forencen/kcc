@@ -17,8 +17,8 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -127,43 +127,25 @@ type TxContext struct {
 
 // TxInternal 内部交易需要的数据
 type TxInternal struct {
-	from        common.Address
-	to          common.Address
-	value       *big.Int
-	data        []byte
-	action      string
-	blockNumber *big.Int
-	blockHash   common.Hash
-	txHash      common.Hash
-	index       int
-	depth       string
-	error       string
+	From        common.Address
+	To          common.Address
+	Value       *big.Int
+	InputData   string
+	OutputData  string
+	Action      string
+	BlockNumber *big.Int
+	BlockHash   common.Hash
+	BlockTime   string
+	TxHash      common.Hash
+	Index       int
+	Depth       string
+	Error       string
+	GasLimit    uint64
+	GasUsed     uint64
 }
 
-func (tx *TxInternal) SetError(_error string) {
-	tx.error = _error
-}
-
-func (tx *TxInternal) SetBlockNumber(_blockNumber *big.Int) {
-	tx.blockNumber = _blockNumber
-}
-
-func (tx *TxInternal) ToString() string {
-	var buf bytes.Buffer
-	buf.WriteString("internalTracer\t")
-	buf.WriteString(fmt.Sprintf("action=%s\t", tx.action))
-	buf.WriteString(fmt.Sprintf("from=%s\t", strings.ToLower(tx.from.Hex())))
-	buf.WriteString(fmt.Sprintf("to=%s\t", strings.ToLower(tx.to.Hex())))
-	buf.WriteString(fmt.Sprintf("value=%d\t", tx.value))
-	buf.WriteString(fmt.Sprintf("txHash=%s\t", tx.txHash.Hex()))
-	buf.WriteString(fmt.Sprintf("depth=%s\t", tx.depth))
-	buf.WriteString(fmt.Sprintf("index=%d\t", tx.index))
-	buf.WriteString(fmt.Sprintf("blockNumber=%d\t", tx.blockNumber))
-	buf.WriteString(fmt.Sprintf("blockHash=%s\t", tx.blockHash.Hex()))
-	buf.WriteString(fmt.Sprintf("data=%s\t", hex.EncodeToString(tx.data)))
-	buf.WriteString(fmt.Sprintf("error=%s", tx.error))
-
-	return buf.String()
+func (tx *TxInternal) ToString() ([]byte, error) {
+	return json.Marshal(tx)
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -278,21 +260,23 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
-		from:      caller.Address(),
-		to:        addr,
-		value:     value,
-		data:      input,
-		action:    "CALL",
-		blockHash: evm.StateDB.GetBHash(),
-		txHash:    evm.StateDB.GetTHash(),
-		index:     evm.TxContext.Index,
-		depth:     depthStr[1 : len(depthStr)-1],
+		From:      caller.Address(),
+		To:        addr,
+		Value:     value,
+		InputData: hex.EncodeToString(input),
+		Action:    "CALL",
+		BlockHash: evm.StateDB.GetBHash(),
+		TxHash:    evm.StateDB.GetTHash(),
+		Index:     evm.TxContext.Index,
+		Depth:     depthStr[1 : len(depthStr)-1],
+		GasLimit:  gas,
 	}
+
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		internalTxKey := strings.Join([]string{internalTx.TxHash.Hex(), internalTx.Depth}, "_")
 		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
@@ -355,8 +339,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		// TODO: consider clearing up unused snapshots:
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
-		internalTx.SetError(err.Error())
+		internalTx.Error = err.Error()
 	}
+	internalTx.OutputData = hex.EncodeToString(ret)
+	internalTx.GasUsed = internalTx.GasLimit - gas
 	return ret, gas, err
 }
 
@@ -385,21 +371,22 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	var snapshot = evm.StateDB.Snapshot()
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
-		from:      caller.Address(),
-		to:        addr,
-		value:     value,
-		data:      input,
-		action:    "CALL",
-		blockHash: evm.StateDB.GetBHash(),
-		txHash:    evm.StateDB.GetTHash(),
-		index:     evm.TxContext.Index,
-		depth:     depthStr[1 : len(depthStr)-1],
+		From:      caller.Address(),
+		To:        addr,
+		Value:     value,
+		InputData: hex.EncodeToString(input),
+		Action:    "CALL",
+		BlockHash: evm.StateDB.GetBHash(),
+		TxHash:    evm.StateDB.GetTHash(),
+		Index:     evm.TxContext.Index,
+		Depth:     depthStr[1 : len(depthStr)-1],
+		GasLimit:  gas,
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		internalTxKey := strings.Join([]string{internalTx.TxHash.Hex(), internalTx.Depth}, "_")
 		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
@@ -423,8 +410,10 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		if err != ErrExecutionReverted {
 			gas = 0
 		}
-		internalTx.SetError(err.Error())
+		internalTx.Error = err.Error()
 	}
+	internalTx.OutputData = hex.EncodeToString(ret)
+	internalTx.GasUsed = internalTx.GasLimit - gas
 	return ret, gas, err
 }
 
@@ -443,21 +432,22 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
-		from:      caller.Address(),
-		to:        addr,
-		value:     big.NewInt(0),
-		data:      input,
-		action:    "DELEGATECALL",
-		blockHash: evm.StateDB.GetBHash(),
-		txHash:    evm.StateDB.GetTHash(),
-		index:     evm.TxContext.Index,
-		depth:     depthStr[1 : len(depthStr)-1],
+		From:      caller.Address(),
+		To:        addr,
+		Value:     big.NewInt(0),
+		InputData: hex.EncodeToString(input),
+		Action:    "DELEGATECALL",
+		BlockHash: evm.StateDB.GetBHash(),
+		TxHash:    evm.StateDB.GetTHash(),
+		Index:     evm.TxContext.Index,
+		Depth:     depthStr[1 : len(depthStr)-1],
+		GasLimit:  gas,
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		internalTxKey := strings.Join([]string{internalTx.TxHash.Hex(), internalTx.Depth}, "_")
 		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
@@ -482,8 +472,10 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		if err != ErrExecutionReverted {
 			gas = 0
 		}
-		internalTx.SetError(err.Error())
+		internalTx.Error = err.Error()
 	}
+	internalTx.OutputData = hex.EncodeToString(ret)
+	internalTx.GasUsed = internalTx.GasLimit - gas
 	return ret, gas, err
 }
 
@@ -507,21 +499,22 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	var snapshot = evm.StateDB.Snapshot()
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
-		from:      caller.Address(),
-		to:        addr,
-		value:     big.NewInt(0),
-		data:      input,
-		action:    "STATICCALL",
-		blockHash: evm.StateDB.GetBHash(),
-		txHash:    evm.StateDB.GetTHash(),
-		index:     evm.TxContext.Index,
-		depth:     depthStr[1 : len(depthStr)-1],
+		From:      caller.Address(),
+		To:        addr,
+		Value:     big.NewInt(0),
+		InputData: hex.EncodeToString(input),
+		Action:    "STATICCALL",
+		BlockHash: evm.StateDB.GetBHash(),
+		TxHash:    evm.StateDB.GetTHash(),
+		Index:     evm.TxContext.Index,
+		Depth:     depthStr[1 : len(depthStr)-1],
+		GasLimit:  gas,
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		internalTxKey := strings.Join([]string{internalTx.TxHash.Hex(), internalTx.Depth}, "_")
 		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
@@ -556,8 +549,10 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		if err != ErrExecutionReverted {
 			gas = 0
 		}
-		internalTx.SetError(err.Error())
+		internalTx.Error = err.Error()
 	}
+	internalTx.OutputData = hex.EncodeToString(ret)
+	internalTx.GasUsed = internalTx.GasLimit - gas
 	return ret, gas, err
 }
 
@@ -585,21 +580,22 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
-		from:      caller.Address(),
-		to:        address,
-		value:     big.NewInt(0),
-		data:      codeAndHash.code,
-		action:    typ,
-		blockHash: evm.StateDB.GetBHash(),
-		txHash:    evm.StateDB.GetTHash(),
-		index:     evm.TxContext.Index,
-		depth:     depthStr[1 : len(depthStr)-1],
+		From:      caller.Address(),
+		To:        address,
+		Value:     big.NewInt(0),
+		InputData: hex.EncodeToString(codeAndHash.code),
+		Action:    typ,
+		BlockHash: evm.StateDB.GetBHash(),
+		TxHash:    evm.StateDB.GetTHash(),
+		Index:     evm.TxContext.Index,
+		Depth:     depthStr[1 : len(depthStr)-1],
+		GasLimit:  gas,
 	}
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
 		}
-		internalTxKey := strings.Join([]string{internalTx.txHash.Hex(), internalTx.depth}, "_")
+		internalTxKey := strings.Join([]string{internalTx.TxHash.Hex(), internalTx.Depth}, "_")
 		evm.TxContext.Traces[internalTxKey] = internalTx
 		evm.TxContext.Index += 1
 		evm.TxContext.Trace[len(evm.TxContext.Trace)-1] += 1
@@ -671,9 +667,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		evm.vmConfig.Tracer.CaptureEnd(ret, gas-contract.Gas, time.Since(start), err)
 	}
 	if err != nil {
-		internalTx.SetError(err.Error())
+		internalTx.Error = err.Error()
 	}
-
+	internalTx.OutputData = hex.EncodeToString(ret)
+	internalTx.GasUsed = internalTx.GasLimit - gas
 	return ret, address, contract.Gas, err
 
 }
