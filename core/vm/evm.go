@@ -142,6 +142,7 @@ type TxInternal struct {
 	Error       string
 	GasLimit    uint64
 	GasUsed     uint64
+	LeftOverGas uint64
 }
 
 func (tx *TxInternal) ToString() ([]byte, error) {
@@ -283,6 +284,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}()
 	// Fail if we're trying to transfer more than the available balance
 	if value.Sign() != 0 && !evm.Context.CanTransfer(evm.StateDB, caller.Address(), value) {
+		internalTx.OutputData = hex.EncodeToString(ret)
+		internalTx.GasUsed = internalTx.GasLimit - gas
+		internalTx.LeftOverGas = gas
 		return nil, gas, ErrInsufficientBalance
 	}
 	snapshot := evm.StateDB.Snapshot()
@@ -295,6 +299,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 				evm.vmConfig.Tracer.CaptureStart(caller.Address(), addr, false, input, gas, value)
 				evm.vmConfig.Tracer.CaptureEnd(ret, 0, 0, nil)
 			}
+			internalTx.OutputData = hex.EncodeToString(ret)
+			internalTx.GasUsed = internalTx.GasLimit - gas
+			internalTx.LeftOverGas = gas
 			return nil, gas, nil
 		}
 		evm.StateDB.CreateAccount(addr)
@@ -307,6 +314,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			evm.vmConfig.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
+
+	defer func(startGas uint64) {
+		internalTx.GasUsed = startGas - gas
+		internalTx.LeftOverGas = gas
+	}(gas)
 
 	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
@@ -342,7 +354,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		internalTx.Error = err.Error()
 	}
 	internalTx.OutputData = hex.EncodeToString(ret)
-	internalTx.GasUsed = internalTx.GasLimit - gas
+
 	return ret, gas, err
 }
 
@@ -375,7 +387,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		To:        addr,
 		Value:     value,
 		InputData: hex.EncodeToString(input),
-		Action:    "CALL",
+		Action:    "CALLCODE",
 		BlockHash: evm.StateDB.GetBHash(),
 		TxHash:    evm.StateDB.GetTHash(),
 		Index:     evm.TxContext.Index,
@@ -414,6 +426,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	}
 	internalTx.OutputData = hex.EncodeToString(ret)
 	internalTx.GasUsed = internalTx.GasLimit - gas
+	internalTx.LeftOverGas = gas
 	return ret, gas, err
 }
 
@@ -476,6 +489,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	internalTx.OutputData = hex.EncodeToString(ret)
 	internalTx.GasUsed = internalTx.GasLimit - gas
+	internalTx.LeftOverGas = gas
 	return ret, gas, err
 }
 
@@ -484,19 +498,6 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	if evm.vmConfig.NoRecursion && evm.depth > 0 {
-		return nil, gas, nil
-	}
-	// Fail if we're trying to execute above the call depth limit
-	if evm.depth > int(params.CallCreateDepth) {
-		return nil, gas, ErrDepth
-	}
-	// We take a snapshot here. This is a bit counter-intuitive, and could probably be skipped.
-	// However, even a staticcall is considered a 'touch'. On mainnet, static calls were introduced
-	// after all empty accounts were deleted, so this is not required. However, if we omit this,
-	// then certain tests start failing; stRevertTest/RevertPrecompiledTouchExactOOG.json.
-	// We could change this, but for now it's left for legacy reasons
-	var snapshot = evm.StateDB.Snapshot()
 	depthStr := strings.Replace(fmt.Sprint(evm.TxContext.Trace[1:]), " ", "_", -1)
 	internalTx := &TxInternal{
 		From:      caller.Address(),
@@ -510,6 +511,19 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		Depth:     depthStr[1 : len(depthStr)-1],
 		GasLimit:  gas,
 	}
+	if evm.vmConfig.NoRecursion && evm.depth > 0 {
+		return nil, gas, nil
+	}
+	// Fail if we're trying to execute above the call depth limit
+	if evm.depth > int(params.CallCreateDepth) {
+		return nil, gas, ErrDepth
+	}
+	// We take a snapshot here. This is a bit counter-intuitive, and could probably be skipped.
+	// However, even a staticcall is considered a 'touch'. On mainnet, static calls were introduced
+	// after all empty accounts were deleted, so this is not required. However, if we omit this,
+	// then certain tests start failing; stRevertTest/RevertPrecompiledTouchExactOOG.json.
+	// We could change this, but for now it's left for legacy reasons
+	var snapshot = evm.StateDB.Snapshot()
 	defer func() {
 		if (evm.StateDB.GetBHash().Hex() == common.Hash{}.Hex()) {
 			return
@@ -553,6 +567,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	}
 	internalTx.OutputData = hex.EncodeToString(ret)
 	internalTx.GasUsed = internalTx.GasLimit - gas
+	internalTx.LeftOverGas = gas
 	return ret, gas, err
 }
 
@@ -670,7 +685,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		internalTx.Error = err.Error()
 	}
 	internalTx.OutputData = hex.EncodeToString(ret)
-	internalTx.GasUsed = internalTx.GasLimit - gas
+	internalTx.GasUsed = internalTx.GasLimit - contract.Gas
+	internalTx.LeftOverGas = contract.Gas
 	return ret, address, contract.Gas, err
 
 }
