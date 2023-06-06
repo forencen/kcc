@@ -1,0 +1,57 @@
+name: build-and-release
+run-name: "Build & Release"
+on: 
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: The branch to build 
+        required: false
+        default:  "kcc"
+        type: string 
+      docker_repo:
+        description: The docker hub repo 
+        required: false
+        default: "kucoincommunitychain/kcc"
+jobs:
+  build-and-release:
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout kcc's repo into kcc/
+        uses: actions/checkout@v3
+        with:
+          path: kcc
+          ref: ${{ inputs.branch }}
+      - name: build kcc docker image 
+        run: cd $GITHUB_WORKSPACE/kcc && docker build -t ${{ inputs.docker_repo }}:latest . 
+      - name: copy binary 
+        run: |
+           mkdir -p $GITHUB_WORKSPACE/build/bin && docker create --name binContainer ${{ inputs.docker_repo }}:latest && \
+           docker cp binContainer:/usr/local/bin/geth $GITHUB_WORKSPACE/build/bin/geth && ls -la $GITHUB_WORKSPACE/build/bin/geth
+      - name: Get the version from the binary
+        run: |
+          version_tag=$( $GITHUB_WORKSPACE/build/bin/geth version|egrep "^Version" |egrep -o '[0-9].*') && \
+          echo "version_tag=v$version_tag" >> $GITHUB_ENV
+      - name: Push the tag 
+        run: |
+          cd $GITHUB_WORKSPACE/kcc && git tag ${{ env.version_tag }} && git push origin ${{ env.version_tag }}
+      - name: retag the docker image 
+        run: |
+            docker tag ${{ inputs.docker_repo }}:latest ${{ inputs.docker_repo }}:${{ env.version_tag }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: push docker images 
+        run: |
+          docker push ${{ inputs.docker_repo }}:latest && docker push ${{ inputs.docker_repo }}:${{ env.version_tag }}
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ env.version_tag }}"
+          prerelease: true
+          title: "${{ env.version_tag }}"
+          files: |
+              build/bin/geth  
+

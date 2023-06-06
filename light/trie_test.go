@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -36,7 +37,10 @@ func TestNodeIterator(t *testing.T) {
 	var (
 		fulldb  = rawdb.NewMemoryDatabase()
 		lightdb = rawdb.NewMemoryDatabase()
-		gspec   = core.Genesis{Alloc: core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}}}
+		gspec   = core.Genesis{
+			Alloc:   core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+			BaseFee: big.NewInt(params.InitialBaseFee),
+		}
 		genesis = gspec.MustCommit(fulldb)
 	)
 	gspec.MustCommit(lightdb)
@@ -72,7 +76,7 @@ func diffTries(t1, t2 state.Trie) error {
 	case i1.Err != nil:
 		return fmt.Errorf("full trie iterator error: %v", i1.Err)
 	case i2.Err != nil:
-		return fmt.Errorf("light trie iterator error: %v", i1.Err)
+		return fmt.Errorf("light trie iterator error: %v", i2.Err)
 	case i1.Next():
 		return fmt.Errorf("full trie iterator has more k/v pairs")
 	case i2.Next():

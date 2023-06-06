@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2020 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -27,8 +27,7 @@ import (
 )
 
 // Tests that handshake failures are detected and reported correctly.
-func TestHandshake64(t *testing.T) { testHandshake(t, 64) }
-func TestHandshake65(t *testing.T) { testHandshake(t, 65) }
+func TestHandshake66(t *testing.T) { testHandshake(t, ETH66) }
 
 func testHandshake(t *testing.T, protocol uint) {
 	t.Parallel()

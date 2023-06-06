@@ -185,6 +185,10 @@ func (w *trezorDriver) SignTx(path accounts.DerivationPath, tx *types.Transactio
 	return w.trezorSign(path, tx, chainID)
 }
 
+func (w *trezorDriver) SignTypedMessage(path accounts.DerivationPath, domainHash []byte, messageHash []byte) ([]byte, error) {
+	return nil, accounts.ErrNotSupported
+}
+
 // trezorDerive sends a derivation request to the Trezor device and returns the
 // Ethereum address located on that path.
 func (w *trezorDriver) trezorDerive(derivationPath []uint32) (common.Address, error) {
@@ -192,10 +196,10 @@ func (w *trezorDriver) trezorDerive(derivationPath []uint32) (common.Address, er
 	if _, err := w.trezorExchange(&trezor.EthereumGetAddress{AddressN: derivationPath}, address); err != nil {
 		return common.Address{}, err
 	}
-	if addr := address.GetAddressBin(); len(addr) > 0 { // Older firmwares use binary fomats
+	if addr := address.GetAddressBin(); len(addr) > 0 { // Older firmwares use binary formats
 		return common.BytesToAddress(addr), nil
 	}
-	if addr := address.GetAddressHex(); len(addr) > 0 { // Newer firmwares use hexadecimal fomats
+	if addr := address.GetAddressHex(); len(addr) > 0 { // Newer firmwares use hexadecimal formats
 		return common.HexToAddress(addr), nil
 	}
 	return common.Address{}, errors.New("missing derived address")

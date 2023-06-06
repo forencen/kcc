@@ -41,6 +41,15 @@ func TestnetGenesis() string {
 	return string(enc)
 }
 
+// SepoliaGenesis returns the JSON spec to use for the Sepolia test network.
+func SepoliaGenesis() string {
+	enc, err := json.Marshal(core.DefaultSepoliaGenesisBlock())
+	if err != nil {
+		panic(err)
+	}
+	return string(enc)
+}
+
 // FoundationBootnodes returns the enode URLs of the P2P bootstrap nodes operated
 // by the foundation running the V5 discovery protocol.
 func FoundationBootnodes() *Enodes {

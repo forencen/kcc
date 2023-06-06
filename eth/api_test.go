@@ -29,12 +29,19 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 var dumper = spew.ConfigState{Indent: "    "}
 
 func accountRangeTest(t *testing.T, trie *state.Trie, statedb *state.StateDB, start common.Hash, requestedNum int, expectedNum int) state.IteratorDump {
-	result := statedb.IteratorDump(true, true, false, start.Bytes(), requestedNum)
+	result := statedb.IteratorDump(&state.DumpConfig{
+		SkipCode:          true,
+		SkipStorage:       true,
+		OnlyWithAddresses: false,
+		Start:             start.Bytes(),
+		Max:               uint64(requestedNum),
+	})
 
 	if len(result.Accounts) != expectedNum {
 		t.Fatalf("expected %d results, got %d", expectedNum, len(result.Accounts))
@@ -60,7 +67,7 @@ func TestAccountRange(t *testing.T) {
 	t.Parallel()
 
 	var (
-		statedb  = state.NewDatabaseWithConfig(rawdb.NewMemoryDatabase(), nil)
+		statedb  = state.NewDatabaseWithConfig(rawdb.NewMemoryDatabase(), &trie.Config{Preimages: true})
 		state, _ = state.New(common.Hash{}, statedb, nil)
 		addrs    = [AccountRangeMaxResults * 2]common.Address{}
 		m        = map[common.Address]bool{}
@@ -131,12 +138,17 @@ func TestEmptyAccountRange(t *testing.T) {
 	t.Parallel()
 
 	var (
-		statedb  = state.NewDatabase(rawdb.NewMemoryDatabase())
-		state, _ = state.New(common.Hash{}, statedb, nil)
+		statedb = state.NewDatabase(rawdb.NewMemoryDatabase())
+		st, _   = state.New(common.Hash{}, statedb, nil)
 	)
-	state.Commit(true)
-	state.IntermediateRoot(true)
-	results := state.IteratorDump(true, true, true, (common.Hash{}).Bytes(), AccountRangeMaxResults)
+	st.Commit(true)
+	st.IntermediateRoot(true)
+	results := st.IteratorDump(&state.DumpConfig{
+		SkipCode:          true,
+		SkipStorage:       true,
+		OnlyWithAddresses: true,
+		Max:               uint64(AccountRangeMaxResults),
+	})
 	if bytes.Equal(results.Next, (common.Hash{}).Bytes()) {
 		t.Fatalf("Empty results should not return a second page")
 	}
@@ -202,7 +214,7 @@ func TestStorageRangeAt(t *testing.T) {
 			t.Error(err)
 		}
 		if !reflect.DeepEqual(result, test.want) {
-			t.Fatalf("wrong result for range 0x%x.., limit %d:\ngot %s\nwant %s",
+			t.Fatalf("wrong result for range %#x.., limit %d:\ngot %s\nwant %s",
 				test.start, test.limit, dumper.Sdump(result), dumper.Sdump(&test.want))
 		}
 	}

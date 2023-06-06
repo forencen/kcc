@@ -1,0 +1,54 @@
+
+name: hive
+run-name: hive simulations
+on: 
+  pull_request:
+env:
+  HIVE_REPO: kcc-community/hive
+jobs:
+  hive-smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout kcc's repo into kcc/
+        uses: actions/checkout@v3
+        with:
+          path: kcc
+      - name: checkout hive's repo into hive/
+        uses: actions/checkout@v3
+        with:
+          path: hive
+          repository: ${{ env.HIVE_REPO }} 
+          ref: master
+      - name: Install golang 
+        uses: actions/setup-go@v3
+        with:
+          go-version: '>=1.18.0'
+      - name: build kcc docker image 
+        run: cd $GITHUB_WORKSPACE/kcc && docker build -t kucoincommunitychain/kcc:latest . 
+      - name: build hive 
+        run: cd $GITHUB_WORKSPACE/hive && go build -v . 
+      - name: "[hive] smoke test"
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --client kcc_latest --sim 'kcc/(smoke|gas-block-limit|gpo)' \
+             ${{ inputs.hive_extra_flags }} 
+      - name: "[hive] Pre EIP-1559: New TX Pool"
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --docker.output --client.checktimelimit 10m --client kcc_latest --sim 'kcc/(new-txpool)' \
+             ${{ inputs.hive_extra_flags }}  
+      - name: "[hive] Pre EIP-1559"
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --client.checktimelimit 10m --client kcc_latest --sim 'kcc/(ancient-db|auth-server|test-flag|deploy-contract|pre-1559)' \
+             ${{ inputs.hive_extra_flags }}  
+      - name: "[hive] Synchronization  with an old client"
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --client kcc,kcc_v1.2.0 --sim 'kcc/(devp2p-eth66)' \
+             ${{ inputs.hive_extra_flags }}  
+      - name: "[hive] issue-9, mallicious tx "
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --client kcc,kcc_v1.0.3 --sim 'kcc/issues/issue-9' \
+             ${{ inputs.hive_extra_flags }}  
+      - name: "[hive] Ishikari hardfork (without punishment)"
+        run: |
+            cd $GITHUB_WORKSPACE/hive && ./hive --panic --client kcc --sim 'kcc/ishikari-(distri|multinode|singlenode)' \
+             ${{ inputs.hive_extra_flags }}  
+      

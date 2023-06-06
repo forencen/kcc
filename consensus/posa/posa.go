@@ -714,7 +714,7 @@ func (c *POSA) trySendBlockReward(chain consensus.ChainHeaderReader, header *typ
 	}
 
 	nonce := state.GetNonce(header.Coinbase)
-	msg := types.NewMessage(header.Coinbase, &contractAddr, nonce, amount, math.MaxUint64, new(big.Int), data, nil, true)
+	msg := types.NewMessage(header.Coinbase, &contractAddr, nonce, amount, math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 
 	if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 		return err
@@ -798,7 +798,7 @@ func (c *POSA) initializeSystemContracts(chain consensus.ChainHeaderReader, head
 		}
 
 		nonce := state.GetNonce(header.Coinbase)
-		msg := types.NewMessage(header.Coinbase, &contract.addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &contract.addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 
 		if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			return err
@@ -835,7 +835,7 @@ func (c *POSA) getTopValidators(chain consensus.ChainHeaderReader, header *types
 
 	contractAddr := c.contractAddrs[contractName]
 
-	msg := types.NewMessage(header.Coinbase, &contractAddr, 0, new(big.Int), math.MaxUint64, new(big.Int), data, nil, false)
+	msg := types.NewMessage(header.Coinbase, &contractAddr, 0, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, false)
 
 	// use parent
 	result, err := executeMsg(msg, stateDB, parent, newChainContext(chain, c), c.chainConfig)
@@ -874,7 +874,7 @@ func (c *POSA) updateValidators(chain consensus.ChainHeaderReader, header *types
 		// call contract
 		nonce := state.GetNonce(header.Coinbase)
 		addr := IshikariValidatorsContractAddr
-		msg := types.NewMessage(header.Coinbase, &addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 		if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			log.Error("Can't update validators to contract", "err", err)
 			return err
@@ -891,7 +891,7 @@ func (c *POSA) updateValidators(chain consensus.ChainHeaderReader, header *types
 
 		// call contract
 		nonce := state.GetNonce(header.Coinbase)
-		msg := types.NewMessage(header.Coinbase, &validatorsContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &validatorsContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 		if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			log.Error("Can't update validators to contract", "err", err)
 			return err
@@ -921,7 +921,7 @@ func (c *POSA) punishValidator(val common.Address, chain consensus.ChainHeaderRe
 
 	// call contract
 	nonce := state.GetNonce(header.Coinbase)
-	msg := types.NewMessage(header.Coinbase, &contractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+	msg := types.NewMessage(header.Coinbase, &contractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 	if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 		log.Error("Can't punish validator", "err", err)
 		return err
@@ -944,7 +944,7 @@ func (c *POSA) decreaseMissedBlocksCounter(chain consensus.ChainHeaderReader, he
 
 		// call contract
 		nonce := state.GetNonce(header.Coinbase)
-		msg := types.NewMessage(header.Coinbase, &IshikariPunishContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &IshikariPunishContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 		if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			log.Error("Can't decrease missed blocks counter for validator", "err", err)
 			return err
@@ -964,7 +964,7 @@ func (c *POSA) decreaseMissedBlocksCounter(chain consensus.ChainHeaderReader, he
 
 		// call contract
 		nonce := state.GetNonce(header.Coinbase)
-		msg := types.NewMessage(header.Coinbase, &punishContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &punishContractAddr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 		if _, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			log.Error("Can't decrease missed blocks counter for validator", "err", err)
 			return err
@@ -1142,9 +1142,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 }
 
-//
 // Ishikari Hard Fork Related
-//
 func (c *POSA) initializeSystemContractsIshikari(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB) error {
 
 	if len(c.config.IshikariInitialValidators) == 0 || len(c.config.IshikariInitialManagers) == 0 || len(c.config.IshikariInitialValidators) != len(c.config.IshikariInitialManagers) {
@@ -1161,7 +1159,7 @@ func (c *POSA) initializeSystemContractsIshikari(chain consensus.ChainHeaderRead
 		}
 
 		nonce := state.GetNonce(header.Coinbase)
-		msg := types.NewMessage(header.Coinbase, &contract.addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), data, nil, true)
+		msg := types.NewMessage(header.Coinbase, &contract.addr, nonce, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, nil, true)
 
 		if ret, err := executeMsg(msg, state, header, newChainContext(chain, c), c.chainConfig); err != nil {
 			panic(string(ret))

@@ -22,7 +22,7 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -39,7 +39,6 @@ import (
 
 // snapshotTestBasic wraps the common testing fields in the snapshot tests.
 type snapshotTestBasic struct {
-	legacy        bool   // Wether write the snapshot journal in legacy format
 	chainBlocks   int    // Number of blocks to generate for the canonical chain
 	snapshotBlock uint64 // Block number of the relevant snapshot disk layer
 	commitBlock   uint64 // Block number for which to commit the state to disk
@@ -59,19 +58,15 @@ type snapshotTestBasic struct {
 
 func (basic *snapshotTestBasic) prepare(t *testing.T) (*BlockChain, []*types.Block) {
 	// Create a temporary persistent database
-	datadir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatalf("Failed to create temporary datadir: %v", err)
-	}
-	os.RemoveAll(datadir)
+	datadir := t.TempDir()
 
-	db, err := rawdb.NewLevelDBDatabaseWithFreezer(datadir, 0, 0, datadir, "")
+	db, err := rawdb.NewLevelDBDatabaseWithFreezer(datadir, 0, 0, datadir, "", false)
 	if err != nil {
 		t.Fatalf("Failed to create persistent database: %v", err)
 	}
 	// Initialize a fresh chain
 	var (
-		genesis = new(Genesis).MustCommit(db)
+		genesis = (&Genesis{BaseFee: big.NewInt(params.InitialBaseFee)}).MustCommit(db)
 		engine  = ethash.NewFullFaker()
 		gendb   = rawdb.NewMemoryDatabase()
 
@@ -104,19 +99,13 @@ func (basic *snapshotTestBasic) prepare(t *testing.T) (*BlockChain, []*types.Blo
 			chain.stateCache.TrieDB().Commit(blocks[point-1].Root(), true, nil)
 		}
 		if basic.snapshotBlock > 0 && basic.snapshotBlock == point {
-			if basic.legacy {
-				// Here we commit the snapshot disk root to simulate
-				// committing the legacy snapshot.
-				rawdb.WriteSnapshotRoot(db, blocks[point-1].Root())
-			} else {
-				// Flushing the entire snap tree into the disk, the
-				// relavant (a) snapshot root and (b) snapshot generator
-				// will be persisted atomically.
-				chain.snaps.Cap(blocks[point-1].Root(), 0)
-				diskRoot, blockRoot := chain.snaps.DiskRoot(), blocks[point-1].Root()
-				if !bytes.Equal(diskRoot.Bytes(), blockRoot.Bytes()) {
-					t.Fatalf("Failed to flush disk layer change, want %x, got %x", blockRoot, diskRoot)
-				}
+			// Flushing the entire snap tree into the disk, the
+			// relevant (a) snapshot root and (b) snapshot generator
+			// will be persisted atomically.
+			chain.snaps.Cap(blocks[point-1].Root(), 0)
+			diskRoot, blockRoot := chain.snaps.DiskRoot(), blocks[point-1].Root()
+			if !bytes.Equal(diskRoot.Bytes(), blockRoot.Bytes()) {
+				t.Fatalf("Failed to flush disk layer change, want %x, got %x", blockRoot, diskRoot)
 			}
 		}
 	}
@@ -129,12 +118,6 @@ func (basic *snapshotTestBasic) prepare(t *testing.T) (*BlockChain, []*types.Blo
 	basic.db = db
 	basic.gendb = gendb
 	basic.engine = engine
-
-	// Ugly hack, notify the chain to flush the journal in legacy format
-	// if it's requested.
-	if basic.legacy {
-		chain.writeLegacyJournal = true
-	}
 	return chain, blocks
 }
 
@@ -167,6 +150,7 @@ func (basic *snapshotTestBasic) verify(t *testing.T, chain *BlockChain, blocks [
 	}
 }
 
+//nolint:unused
 func (basic *snapshotTestBasic) dump() string {
 	buffer := new(strings.Builder)
 
@@ -261,7 +245,7 @@ func (snaptest *crashSnapshotTest) test(t *testing.T) {
 	db.Close()
 
 	// Start a new blockchain back up and see where the repair leads us
-	newdb, err := rawdb.NewLevelDBDatabaseWithFreezer(snaptest.datadir, 0, 0, snaptest.datadir, "")
+	newdb, err := rawdb.NewLevelDBDatabaseWithFreezer(snaptest.datadir, 0, 0, snaptest.datadir, "", false)
 	if err != nil {
 		t.Fatalf("Failed to reopen persistent database: %v", err)
 	}
@@ -358,54 +342,6 @@ func (snaptest *setHeadSnapshotTest) test(t *testing.T) {
 	snaptest.verify(t, newchain, blocks)
 }
 
-// restartCrashSnapshotTest is the test type used to test this scenario:
-// - have a complete snapshot
-// - restart chain
-// - insert more blocks with enabling the snapshot
-// - commit the snapshot
-// - crash
-// - restart again
-type restartCrashSnapshotTest struct {
-	snapshotTestBasic
-	newBlocks int
-}
-
-func (snaptest *restartCrashSnapshotTest) test(t *testing.T) {
-	// It's hard to follow the test case, visualize the input
-	// log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	// fmt.Println(tt.dump())
-	chain, blocks := snaptest.prepare(t)
-
-	// Firstly, stop the chain properly, with all snapshot journal
-	// and state committed.
-	chain.Stop()
-
-	newchain, err := NewBlockChain(snaptest.db, nil, params.AllEthashProtocolChanges, snaptest.engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to recreate chain: %v", err)
-	}
-	newBlocks, _ := GenerateChain(params.TestChainConfig, blocks[len(blocks)-1], snaptest.engine, snaptest.gendb, snaptest.newBlocks, func(i int, b *BlockGen) {})
-	newchain.InsertChain(newBlocks)
-
-	// Commit the entire snapshot into the disk if requested. Note only
-	// (a) snapshot root and (b) snapshot generator will be committed,
-	// the diff journal is not.
-	newchain.Snapshots().Cap(newBlocks[len(newBlocks)-1].Root(), 0)
-
-	// Simulate the blockchain crash
-	// Don't call chain.Stop here, so that no snapshot
-	// journal and latest state will be committed
-
-	// Restart the chain after the crash
-	newchain, err = NewBlockChain(snaptest.db, nil, params.AllEthashProtocolChanges, snaptest.engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to recreate chain: %v", err)
-	}
-	defer newchain.Stop()
-
-	snaptest.verify(t, newchain, blocks)
-}
-
 // wipeCrashSnapshotTest is the test type used to test this scenario:
 // - have a complete snapshot
 // - restart, insert more blocks without enabling the snapshot
@@ -448,7 +384,7 @@ func (snaptest *wipeCrashSnapshotTest) test(t *testing.T) {
 		SnapshotLimit:  256,
 		SnapshotWait:   false, // Don't wait rebuild
 	}
-	newchain, err = NewBlockChain(snaptest.db, config, params.AllEthashProtocolChanges, snaptest.engine, vm.Config{}, nil, nil)
+	_, err = NewBlockChain(snaptest.db, config, params.AllEthashProtocolChanges, snaptest.engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to recreate chain: %v", err)
 	}
@@ -484,46 +420,6 @@ func TestRestartWithNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : G
 	test := &snapshotTest{
 		snapshotTestBasic{
-			legacy:             false,
-			chainBlocks:        8,
-			snapshotBlock:      0,
-			commitBlock:        0,
-			expCanonicalBlocks: 8,
-			expHeadHeader:      8,
-			expHeadFastBlock:   8,
-			expHeadBlock:       8,
-			expSnapshotBottom:  0, // Initial disk layer built from genesis
-		},
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests a Geth restart with valid but "legacy" snapshot. Before the shutdown,
-// all snapshot journal will be persisted correctly. In this case no snapshot
-// recovery is required.
-func TestRestartWithLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G
-	// Snapshot: G
-	//
-	// SetHead(0)
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Expected head header    : C8
-	// Expected head fast block: C8
-	// Expected head block     : C8
-	// Expected snapshot disk  : G
-	t.Skip("Legacy format testing is not supported")
-	test := &snapshotTest{
-		snapshotTestBasic{
-			legacy:             true,
 			chainBlocks:        8,
 			snapshotBlock:      0,
 			commitBlock:        0,
@@ -563,7 +459,6 @@ func TestNoCommitCrashWithNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : C4
 	test := &crashSnapshotTest{
 		snapshotTestBasic{
-			legacy:             false,
 			chainBlocks:        8,
 			snapshotBlock:      4,
 			commitBlock:        0,
@@ -603,7 +498,6 @@ func TestLowCommitCrashWithNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : C4
 	test := &crashSnapshotTest{
 		snapshotTestBasic{
-			legacy:             false,
 			chainBlocks:        8,
 			snapshotBlock:      4,
 			commitBlock:        2,
@@ -643,7 +537,6 @@ func TestHighCommitCrashWithNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : C4
 	test := &crashSnapshotTest{
 		snapshotTestBasic{
-			legacy:             false,
 			chainBlocks:        8,
 			snapshotBlock:      4,
 			commitBlock:        6,
@@ -652,131 +545,6 @@ func TestHighCommitCrashWithNewSnapshot(t *testing.T) {
 			expHeadFastBlock:   8,
 			expHeadBlock:       0,
 			expSnapshotBottom:  4, // Last committed disk layer, wait recovery
-		},
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests a Geth was crashed and restarts with a broken and "legacy format"
-// snapshot. In this case the entire legacy snapshot should be discared
-// and rebuild from the new chain head. The new head here refers to the
-// genesis because there is no committed point.
-func TestNoCommitCrashWithLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G
-	// Snapshot: G, C4
-	//
-	// CRASH
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Expected head header    : C8
-	// Expected head fast block: C8
-	// Expected head block     : G
-	// Expected snapshot disk  : G
-	t.Skip("Legacy format testing is not supported")
-	test := &crashSnapshotTest{
-		snapshotTestBasic{
-			legacy:             true,
-			chainBlocks:        8,
-			snapshotBlock:      4,
-			commitBlock:        0,
-			expCanonicalBlocks: 8,
-			expHeadHeader:      8,
-			expHeadFastBlock:   8,
-			expHeadBlock:       0,
-			expSnapshotBottom:  0, // Rebuilt snapshot from the latest HEAD(genesis)
-		},
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests a Geth was crashed and restarts with a broken and "legacy format"
-// snapshot. In this case the entire legacy snapshot should be discared
-// and rebuild from the new chain head. The new head here refers to the
-// block-2 because it's committed into the disk.
-func TestLowCommitCrashWithLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G, C2
-	// Snapshot: G, C4
-	//
-	// CRASH
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Expected head header    : C8
-	// Expected head fast block: C8
-	// Expected head block     : C2
-	// Expected snapshot disk  : C2
-	t.Skip("Legacy format testing is not supported")
-	test := &crashSnapshotTest{
-		snapshotTestBasic{
-			legacy:             true,
-			chainBlocks:        8,
-			snapshotBlock:      4,
-			commitBlock:        2,
-			expCanonicalBlocks: 8,
-			expHeadHeader:      8,
-			expHeadFastBlock:   8,
-			expHeadBlock:       2,
-			expSnapshotBottom:  2, // Rebuilt snapshot from the latest HEAD
-		},
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests a Geth was crashed and restarts with a broken and "legacy format"
-// snapshot. In this case the entire legacy snapshot should be discared
-// and rebuild from the new chain head.
-//
-// The new head here refers to the the genesis, the reason is:
-//   - the state of block-6 is committed into the disk
-//   - the legacy disk layer of block-4 is committed into the disk
-//   - the head is rewound the genesis in order to find an available
-//     state lower than disk layer
-func TestHighCommitCrashWithLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G, C6
-	// Snapshot: G, C4
-	//
-	// CRASH
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Expected head header    : C8
-	// Expected head fast block: C8
-	// Expected head block     : G
-	// Expected snapshot disk  : G
-	t.Skip("Legacy format testing is not supported")
-	test := &crashSnapshotTest{
-		snapshotTestBasic{
-			legacy:             true,
-			chainBlocks:        8,
-			snapshotBlock:      4,
-			commitBlock:        6,
-			expCanonicalBlocks: 8,
-			expHeadHeader:      8,
-			expHeadFastBlock:   8,
-			expHeadBlock:       0,
-			expSnapshotBottom:  0, // Rebuilt snapshot from the latest HEAD(genesis)
 		},
 	}
 	test.test(t)
@@ -806,47 +574,6 @@ func TestGappedNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : C10
 	test := &gappedSnapshotTest{
 		snapshotTestBasic: snapshotTestBasic{
-			legacy:             false,
-			chainBlocks:        8,
-			snapshotBlock:      0,
-			commitBlock:        0,
-			expCanonicalBlocks: 10,
-			expHeadHeader:      10,
-			expHeadFastBlock:   10,
-			expHeadBlock:       10,
-			expSnapshotBottom:  10, // Rebuilt snapshot from the latest HEAD
-		},
-		gapped: 2,
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests a Geth was running with leagcy snapshot enabled. Then restarts
-// without enabling snapshot and after that re-enable the snapshot again.
-// In this case the snapshot should be rebuilt with latest chain head.
-func TestGappedLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G
-	// Snapshot: G
-	//
-	// SetHead(0)
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10
-	//
-	// Expected head header    : C10
-	// Expected head fast block: C10
-	// Expected head block     : C10
-	// Expected snapshot disk  : C10
-	t.Skip("Legacy format testing is not supported")
-	test := &gappedSnapshotTest{
-		snapshotTestBasic: snapshotTestBasic{
-			legacy:             true,
 			chainBlocks:        8,
 			snapshotBlock:      0,
 			commitBlock:        0,
@@ -885,7 +612,6 @@ func TestSetHeadWithNewSnapshot(t *testing.T) {
 	// Expected snapshot disk  : G
 	test := &setHeadSnapshotTest{
 		snapshotTestBasic: snapshotTestBasic{
-			legacy:             false,
 			chainBlocks:        8,
 			snapshotBlock:      0,
 			commitBlock:        0,
@@ -896,88 +622,6 @@ func TestSetHeadWithNewSnapshot(t *testing.T) {
 			expSnapshotBottom:  0, // The initial disk layer is built from the genesis
 		},
 		setHead: 4,
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests the Geth was running with snapshot(legacy-format) enabled and resetHead
-// is applied. In this case the head is rewound to the target(with state available).
-// After that the chain is restarted and the original disk layer is kept.
-func TestSetHeadWithLegacySnapshot(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G
-	// Snapshot: G
-	//
-	// SetHead(4)
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	// Expected snapshot disk  : G
-	t.Skip("Legacy format testing is not supported")
-	test := &setHeadSnapshotTest{
-		snapshotTestBasic: snapshotTestBasic{
-			legacy:             true,
-			chainBlocks:        8,
-			snapshotBlock:      0,
-			commitBlock:        0,
-			expCanonicalBlocks: 4,
-			expHeadHeader:      4,
-			expHeadFastBlock:   4,
-			expHeadBlock:       4,
-			expSnapshotBottom:  0, // The initial disk layer is built from the genesis
-		},
-		setHead: 4,
-	}
-	test.test(t)
-	test.teardown()
-}
-
-// Tests the Geth was running with snapshot(legacy-format) enabled and upgrades
-// the disk layer journal(journal generator) to latest format. After that the Geth
-// is restarted from a crash. In this case Geth will find the new-format disk layer
-// journal but with legacy-format diff journal(the new-format is never committed),
-// and the invalid diff journal is expected to be dropped.
-func TestRecoverSnapshotFromCrashWithLegacyDiffJournal(t *testing.T) {
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8 (HEAD)
-	//
-	// Commit:   G
-	// Snapshot: G
-	//
-	// SetHead(0)
-	//
-	// ------------------------------
-	//
-	// Expected in leveldb:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10
-	//
-	// Expected head header    : C10
-	// Expected head fast block: C10
-	// Expected head block     : C8
-	// Expected snapshot disk  : C10
-	t.Skip("Legacy format testing is not supported")
-	test := &restartCrashSnapshotTest{
-		snapshotTestBasic: snapshotTestBasic{
-			legacy:             true,
-			chainBlocks:        8,
-			snapshotBlock:      0,
-			commitBlock:        0,
-			expCanonicalBlocks: 10,
-			expHeadHeader:      10,
-			expHeadFastBlock:   10,
-			expHeadBlock:       8,  // The persisted state in the first running
-			expSnapshotBottom:  10, // The persisted disk layer in the second running
-		},
-		newBlocks: 2,
 	}
 	test.test(t)
 	test.teardown()
@@ -1006,7 +650,6 @@ func TestRecoverSnapshotFromWipingCrash(t *testing.T) {
 	// Expected snapshot disk  : C10
 	test := &wipeCrashSnapshotTest{
 		snapshotTestBasic: snapshotTestBasic{
-			legacy:             false,
 			chainBlocks:        8,
 			snapshotBlock:      4,
 			commitBlock:        0,

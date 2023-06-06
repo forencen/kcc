@@ -88,8 +88,8 @@ func makechain() (bc *core.BlockChain, addrHashes, txHashes []common.Hash) {
 }
 
 func makeTries() (chtTrie *trie.Trie, bloomTrie *trie.Trie, chtKeys, bloomKeys [][]byte) {
-	chtTrie, _ = trie.New(common.Hash{}, trie.NewDatabase(rawdb.NewMemoryDatabase()))
-	bloomTrie, _ = trie.New(common.Hash{}, trie.NewDatabase(rawdb.NewMemoryDatabase()))
+	chtTrie = trie.NewEmpty(trie.NewDatabase(rawdb.NewMemoryDatabase()))
+	bloomTrie = trie.NewEmpty(trie.NewDatabase(rawdb.NewMemoryDatabase()))
 	for i := 0; i < testChainLen; i++ {
 		// The element in CHT is <big-endian block number> -> <block hash>
 		key := make([]byte, 8)
@@ -261,18 +261,18 @@ func (d dummyMsg) Decode(val interface{}) error {
 }
 
 func (f *fuzzer) doFuzz(msgCode uint64, packet interface{}) {
-	version := f.randomInt(3) + 2 // [LES2, LES3, LES4]
-	peer := l.NewFuzzerPeer(version)
 	enc, err := rlp.EncodeToBytes(packet)
 	if err != nil {
 		panic(err)
 	}
+	version := f.randomInt(3) + 2 // [LES2, LES3, LES4]
+	peer, closeFn := l.NewFuzzerPeer(version)
+	defer closeFn()
 	fn, _, _, err := l.Les3[msgCode].Handle(dummyMsg{enc})
 	if err != nil {
 		panic(err)
 	}
 	fn(f, peer, func() bool { return true })
-
 }
 
 func Fuzz(input []byte) int {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"golang.org/x/crypto/sha3"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -41,6 +42,7 @@ var TrustedCheckpoints = map[common.Hash]*TrustedCheckpoint{}
 var CheckpointOracles = map[common.Hash]*CheckpointOracleConfig{}
 
 var (
+
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(321),
@@ -63,8 +65,8 @@ var (
 		IshikariPatch001Block: big.NewInt(11171299),
 		IshikariPatch002Block: big.NewInt(11171299),
 		POSA: &POSAConfig{
-			Period:                    3,
-			Epoch:                     100,
+			Period: 3,
+			Epoch:  100,
 			IshikariInitialValidators: []common.Address{
 				common.HexToAddress("0x1105c97ffbd985600e6dc8e06e477b99d0a9ff39"),
 				common.HexToAddress("0xeac6d9b96c73a637ba9d7a54dc4faece0300fcb3"),
@@ -82,7 +84,7 @@ var (
 				common.HexToAddress("0xad291383864e1999fc7a36120562f1bb59dfea99"),
 			}, // @cary @Junm TODO: Ishikari initial validators
 
-			IshikariInitialManagers:   []common.Address{
+			IshikariInitialManagers: []common.Address{
 				common.HexToAddress("0x65E958D3EA7e60F33098dc665B0C8B7Dc563FA72"),
 				common.HexToAddress("0x6586e16EB5574f79bA4Cfa46C3b37bAEAAC50f32"),
 				common.HexToAddress("0xCCbb95B446e7CFd23fb80374b92d1F6F33e073E2"),
@@ -98,7 +100,7 @@ var (
 				common.HexToAddress("0xb9D71eF2D3A31588EF9196e66d69EE20B7302af8"),
 				common.HexToAddress("0x68A6a68d03D405af7E4676e5D92AD4BD7d1d004a"),
 			},
-			IshikariAdminMultiSig:     common.HexToAddress("0xD4139cc315164d4dcC696a18902F2e6b7B5D3de8"),
+			IshikariAdminMultiSig: common.HexToAddress("0xD4139cc315164d4dcC696a18902F2e6b7B5D3de8"),
 		},
 	}
 
@@ -154,16 +156,17 @@ var (
 	//
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
-	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, new(EthashConfig), nil, nil}
+	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, new(EthashConfig), nil, nil}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	//
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
-	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}, nil}
+	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, &CliqueConfig{Period: 0, Epoch: 30000}, nil}
 
-	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, new(EthashConfig), nil, nil}
+	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, new(EthashConfig), nil, nil}
+	TestRules       = TestChainConfig.Rules(new(big.Int), false)
 )
 
 // TrustedCheckpoint represents a set of post-processed trie roots (CHT and
@@ -193,6 +196,18 @@ func (c *TrustedCheckpoint) Hash() common.Hash {
 	copy(buf[8+common.HashLength:], c.CHTRoot.Bytes())
 	copy(buf[8+2*common.HashLength:], c.BloomRoot.Bytes())
 	return crypto.Keccak256Hash(buf)
+	var sectionIndex [8]byte
+	binary.BigEndian.PutUint64(sectionIndex[:], c.SectionIndex)
+
+	w := sha3.NewLegacyKeccak256()
+	w.Write(sectionIndex[:])
+	w.Write(c.SectionHead[:])
+	w.Write(c.CHTRoot[:])
+	w.Write(c.BloomRoot[:])
+
+	var h common.Hash
+	w.Sum(h[:0])
+	return h
 }
 
 // Empty returns an indicator whether the checkpoint is regarded as empty.
@@ -252,11 +267,33 @@ type ChainConfig struct {
 	// A patch for Ishikari hardfork
 	// The punishment parameters for mainnet is determined in this hardfork
 	IshikariPatch002Block *big.Int `json:"ishikariPatch002Block,omitempty"`
+	YoloV3Block           *big.Int `json:"yoloV3Block,omitempty"` // YOLO v3: Gas repricings TODO @holiman add EIP references
+	EWASMBlock            *big.Int `json:"ewasmBlock,omitempty"`  // EWASM switch block (nil = no fork, 0 = already activated)
 
-	YoloV3Block *big.Int `json:"yoloV3Block,omitempty"` // YOLO v3: Gas repricings TODO @holiman add EIP references
-	EWASMBlock  *big.Int `json:"ewasmBlock,omitempty"`  // EWASM switch block (nil = no fork, 0 = already activated)
+	// @KCC-TODO We will never use the London Block
+	// Move it to the end
+	LondonBlock *big.Int `json:"londonBlock,omitempty"`
 
-	//
+	// @KCC-TODO We will never use this hardfork
+	ArrowGlacierBlock *big.Int `json:"arrowGlacielock,omitempty"`  // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	GrayGlacierBlock  *big.Int `json:"grayGlacierBlock,omitempty"` // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	// @KCC-TODO We will never use the merge h
+	MergeNetsplitBlock *big.Int `json:"mergeNetsplitBlock,omitempty"` // Virtual fork after The Merge to use as a network splitter
+
+	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Shanghai switch block (nil = no fork, 0 = already on shanghai)
+	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch block (nil = no fork, 0 = already on cancun)
+
+	// @KCC-TODO: We will not enable TTD
+	// The hardfork should not reflect on the forkid.
+	// TerminalTotalDifficulty is the amount of total difficulty reached by
+	// the network that triggers the consensus upgrade.
+	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"`
+
+	// @KCC-TODO This is always false in KCC
+	// TerminalTotalDifficultyPassed is a flag specifying that the network already
+	// passed the terminal total difficulty. Its purpose is to disable legacy sync
+	// even without having seen the TTD locally (safer long term).
+	TerminalTotalDifficultyPassed bool `json:"terminalTotalDifficultyPassed,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -425,7 +462,30 @@ func (c *ChainConfig) IsIstanbul(num *big.Int) bool {
 
 // IsBerlin returns whether num is either equal to the Berlin fork block or greater.
 func (c *ChainConfig) IsBerlin(num *big.Int) bool {
-	return isForked(c.BerlinBlock, num) || isForked(c.YoloV3Block, num)
+	return isForked(c.BerlinBlock, num)
+}
+
+// IsLondon returns whether num is either equal to the London fork block or greater.
+func (c *ChainConfig) IsLondon(num *big.Int) bool {
+	return isForked(c.LondonBlock, num)
+}
+
+// IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
+func (c *ChainConfig) IsArrowGlacier(num *big.Int) bool {
+	return isForked(c.ArrowGlacierBlock, num)
+}
+
+// IsGrayGlacier returns whether num is either equal to the Gray Glacier (EIP-5133) fork block or greater.
+func (c *ChainConfig) IsGrayGlacier(num *big.Int) bool {
+	return isForked(c.GrayGlacierBlock, num)
+}
+
+// IsTerminalPoWBlock returns whether the given block is the last block of PoW stage.
+func (c *ChainConfig) IsTerminalPoWBlock(parentTotalDiff *big.Int, totalDiff *big.Int) bool {
+	if c.TerminalTotalDifficulty == nil {
+		return false
+	}
+	return parentTotalDiff.Cmp(c.TerminalTotalDifficulty) < 0 && totalDiff.Cmp(c.TerminalTotalDifficulty) >= 0
 }
 
 // IsEWASM returns whether num represents a block number after the EWASM fork
@@ -433,9 +493,19 @@ func (c *ChainConfig) IsEWASM(num *big.Int) bool {
 	return isForked(c.EWASMBlock, num)
 }
 
+// IsShanghai returns whether num is either equal to the Shanghai fork block or greater.
+func (c *ChainConfig) IsShanghai(num *big.Int) bool {
+	return isForked(c.ShanghaiBlock, num)
+}
+
 // is Ishikari hardfork enabled ?
 func (c *ChainConfig) IsKCCIshikari(num *big.Int) bool {
 	return isForked(c.IshikariBlock, num)
+}
+
+// IsCancun returns whether num is either equal to the Cancun fork block or greater.
+func (c *ChainConfig) IsCancun(num *big.Int) bool {
+	return isForked(c.CancunBlock, num)
 }
 
 // is the block number "num" when Ishikari hardfork happens ?
@@ -658,10 +728,12 @@ type Rules struct {
 	IsBerlin                                                bool
 	IsIshikari                                              bool
 	IsCVE_2021_39137BlockPassed                             bool
+	IsLondon                                                bool
+	IsMerge, IsShanghai, isCancun                           bool
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num *big.Int) Rules {
+func (c *ChainConfig) Rules(num *big.Int, isMerge bool) Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -679,5 +751,9 @@ func (c *ChainConfig) Rules(num *big.Int) Rules {
 		IsBerlin:                    c.IsBerlin(num),
 		IsIshikari:                  c.IsKCCIshikari(num),
 		IsCVE_2021_39137BlockPassed: c.CVE_2021_39137Block == nil || c.CVE_2021_39137Block.Cmp(num) < 0,
+		IsLondon:                    c.IsLondon(num),
+		IsMerge:                     isMerge,
+		IsShanghai:                  c.IsShanghai(num),
+		isCancun:                    c.IsCancun(num),
 	}
 }

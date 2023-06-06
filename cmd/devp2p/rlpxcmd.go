@@ -25,28 +25,39 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/rlpx"
 	"github.com/ethereum/go-ethereum/rlp"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli/v2"
 )
 
 var (
-	rlpxCommand = cli.Command{
+	rlpxCommand = &cli.Command{
 		Name:  "rlpx",
 		Usage: "RLPx Commands",
-		Subcommands: []cli.Command{
+		Subcommands: []*cli.Command{
 			rlpxPingCommand,
 			rlpxEthTestCommand,
+			rlpxSnapTestCommand,
 		},
 	}
-	rlpxPingCommand = cli.Command{
+	rlpxPingCommand = &cli.Command{
 		Name:   "ping",
 		Usage:  "ping <node>",
 		Action: rlpxPing,
 	}
-	rlpxEthTestCommand = cli.Command{
+	rlpxEthTestCommand = &cli.Command{
 		Name:      "eth-test",
 		Usage:     "Runs tests against a node",
 		ArgsUsage: "<node> <chain.rlp> <genesis.json>",
 		Action:    rlpxEthTest,
+		Flags: []cli.Flag{
+			testPatternFlag,
+			testTAPFlag,
+		},
+	}
+	rlpxSnapTestCommand = &cli.Command{
+		Name:      "snap-test",
+		Usage:     "Runs tests against a node",
+		ArgsUsage: "<node> <chain.rlp> <genesis.json>",
+		Action:    rlpxSnapTest,
 		Flags: []cli.Flag{
 			testPatternFlag,
 			testTAPFlag,
@@ -94,9 +105,21 @@ func rlpxEthTest(ctx *cli.Context) error {
 	if ctx.NArg() < 3 {
 		exit("missing path to chain.rlp as command-line argument")
 	}
-	suite, err := ethtest.NewSuite(getNodeArg(ctx), ctx.Args()[1], ctx.Args()[2])
+	suite, err := ethtest.NewSuite(getNodeArg(ctx), ctx.Args().Get(1), ctx.Args().Get(2))
 	if err != nil {
 		exit(err)
 	}
 	return runTests(ctx, suite.EthTests())
+}
+
+// rlpxSnapTest runs the snap protocol test suite.
+func rlpxSnapTest(ctx *cli.Context) error {
+	if ctx.NArg() < 3 {
+		exit("missing path to chain.rlp as command-line argument")
+	}
+	suite, err := ethtest.NewSuite(getNodeArg(ctx), ctx.Args().Get(1), ctx.Args().Get(2))
+	if err != nil {
+		exit(err)
+	}
+	return runTests(ctx, suite.SnapTests())
 }
